@@ -1,0 +1,212 @@
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  </head>
+
+  <body>
+    <a-scene>
+
+      <!-- TEXTURES -->
+      <a-assets>
+        <img id="grassTexture" src="Green-Grass-Texture.jpg">
+        <img id="skyTexture" src="Sunset-Sky-Texture.jpg">
+      </a-assets>
+
+      <!-- SOL -->
+      <a-plane 
+        src="#grassTexture"
+        rotation="-90 0 0"
+        width="50"
+        height="50"
+        repeat="20 20"
+        position="0 0 0">
+      </a-plane>
+
+      <!-- SKYBOX -->
+      <a-sky src="#skyTexture"></a-sky>
+
+      <!-- PLAYER (cube) -->
+      <a-entity id="player"
+        geometry="primitive: box; height: 1; width: 1; depth: 1"
+        material="color: red"
+        position="0 0.5 0"
+        player-controls>
+      </a-entity>
+
+      <!-- CAMERA ORBIT -->
+      <a-entity id="orbit-camera"
+                orbit-controls="target: #player;
+                                distance: 4;
+                                minDistance: 2;
+                                maxDistance: 10;
+                                minPolarAngle: 10;
+                                maxPolarAngle: 80;">
+      </a-entity>
+
+    </a-scene>
+
+    <!-- SCRIPT : DEPLACEMENT DU PLAYER -->
+    <script>
+AFRAME.registerComponent('player-controls', {
+  schema: {},
+
+  init: function () {
+    this.velocity = new THREE.Vector3(0, 0, 0);
+    this.acceleration = 0.08;
+    this.deceleration = 0.05;
+    this.maxSpeed = 0.15;
+    this.jumpForce = 0.25;
+    this.gravity = -0.01;
+
+    this.keys = {};
+
+    window.addEventListener('keydown', e => this.keys[e.code] = true);
+    window.addEventListener('keyup', e => this.keys[e.code] = false);
+  },
+
+  tick: function () {
+    const el = this.el;
+    const pos = el.object3D.position;
+
+    // --- Récupérer la caméra orbit ---
+    const cam = document.querySelector('#orbit-camera').object3D;
+
+    // Direction avant de la caméra
+    const forward = new THREE.Vector3();
+    cam.getWorldDirection(forward);
+    forward.y = 0;          // On ignore la hauteur
+    forward.normalize();
+
+    // Direction droite de la caméra
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).negate();
+    right.normalize();
+
+    // --- Calcul direction du joueur ---
+    let dir = new THREE.Vector3();
+
+    if (this.keys["KeyW"]) dir.add(forward);
+    if (this.keys["KeyS"]) dir.sub(forward);
+    if (this.keys["KeyA"]) dir.sub(right);
+    if (this.keys["KeyD"]) dir.add(right);
+
+    dir.normalize();
+
+    // --- Accélération progressive ---
+    this.velocity.x += dir.x * this.acceleration;
+    this.velocity.z += dir.z * this.acceleration;
+
+    // Limite de vitesse
+    this.velocity.x = THREE.MathUtils.clamp(this.velocity.x, -this.maxSpeed, this.maxSpeed);
+    this.velocity.z = THREE.MathUtils.clamp(this.velocity.z, -this.maxSpeed, this.maxSpeed);
+
+    // --- Décélération progressive ---
+    if (!this.keys["KeyW"] && !this.keys["KeyS"]) {
+      this.velocity.z *= (1 - this.deceleration);
+    }
+    if (!this.keys["KeyA"] && !this.keys["KeyD"]) {
+      this.velocity.x *= (1 - this.deceleration);
+    }
+
+    // --- Saut ---
+    const onGround = pos.y <= 0.5;
+
+    if (onGround) {
+      pos.y = 0.5;
+      if (this.keys["Space"]) {
+        this.velocity.y = this.jumpForce;
+      }
+    } else {
+      this.velocity.y += this.gravity;
+    }
+
+    // --- Appliquer la vitesse ---
+    pos.x += this.velocity.x;
+    pos.z += this.velocity.z;
+    pos.y += this.velocity.y;
+  }
+});
+</script>
+
+
+    <!-- SCRIPT : CAMERA ORBIT -->
+    <script>
+      AFRAME.registerComponent('orbit-controls', {
+        schema: {
+          target: { type: 'selector' },
+          distance: { default: 4 },
+          minDistance: { default: 2 },
+          maxDistance: { default: 10 },
+          minPolarAngle: { default: 10 },   // limite basse
+          maxPolarAngle: { default: 80 }    // limite haute
+        },
+
+        init: function () {
+          this.theta = 0;   // rotation horizontale
+          this.phi = THREE.Math.degToRad(45); // rotation verticale
+          this.zoomSpeed = 0.2;
+          this.rotateSpeed = 0.3;
+
+          this.mouseDown = false;
+          this.lastX = 0;
+          this.lastY = 0;
+
+          window.addEventListener('mousedown', e => {
+            if (e.button === 0) {
+              this.mouseDown = true;
+              this.lastX = e.clientX;
+              this.lastY = e.clientY;
+            }
+          });
+
+          window.addEventListener('mouseup', () => this.mouseDown = false);
+
+          window.addEventListener('mousemove', e => {
+            if (!this.mouseDown) return;
+
+            const dx = e.clientX - this.lastX;
+            const dy = e.clientY - this.lastY;
+
+            this.lastX = e.clientX;
+            this.lastY = e.clientY;
+
+            this.theta -= dx * this.rotateSpeed * 0.01;
+            this.phi -= dy * this.rotateSpeed * 0.01;
+
+            // Limites verticales
+            this.phi = THREE.MathUtils.clamp(
+              this.phi,
+              THREE.Math.degToRad(this.data.minPolarAngle),
+              THREE.Math.degToRad(this.data.maxPolarAngle)
+            );
+          });
+
+          // Zoom molette
+          window.addEventListener('wheel', e => {
+            this.data.distance += e.deltaY * this.zoomSpeed * 0.01;
+            this.data.distance = THREE.MathUtils.clamp(
+              this.data.distance,
+              this.data.minDistance,
+              this.data.maxDistance
+            );
+          });
+        },
+
+        tick: function () {
+          const targetPos = this.data.target.object3D.position;
+
+          // Calcul de la position orbitale
+          const x = targetPos.x + this.data.distance * Math.sin(this.theta) * Math.sin(this.phi);
+          const y = targetPos.y + this.data.distance * Math.cos(this.phi);
+          const z = targetPos.z + this.data.distance * Math.cos(this.theta) * Math.sin(this.phi);
+
+          this.el.object3D.position.set(x, y, z);
+
+          // Toujours regarder le cube
+          this.el.object3D.lookAt(targetPos);
+        }
+      });
+    </script>
+
+  </body>
+</html>
